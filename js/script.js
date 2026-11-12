@@ -1,35 +1,38 @@
+(() => {
 'use strict';
-// Configure somente dados reais. Não coloque números fictícios aqui.
-const BUSINESS = Object.freeze({
-  name: 'Mercado da Vila',
-  whatsapp: '', // DDI + DDD + número, apenas dígitos. Ex.: 5511999999999
-  analyticsEnabled: false
-});
-const menuButton = document.querySelector('.menu-toggle');
-const nav = document.querySelector('#nav-principal');
-function closeMenu(){nav.classList.remove('open');menuButton.setAttribute('aria-expanded','false');menuButton.setAttribute('aria-label','Abrir menu');}
-menuButton.addEventListener('click',()=>{const isOpen=nav.classList.toggle('open');menuButton.setAttribute('aria-expanded',String(isOpen));menuButton.setAttribute('aria-label',isOpen?'Fechar menu':'Abrir menu');});
-nav.querySelectorAll('a').forEach(link=>link.addEventListener('click',closeMenu));
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu();});
-const filters=document.querySelectorAll('[data-filter]');
-filters.forEach(button=>button.addEventListener('click',()=>{
-  filters.forEach(item=>{const active=item===button;item.classList.toggle('active',active);item.setAttribute('aria-pressed',String(active));});
-  document.querySelectorAll('[data-category]').forEach(card=>{card.hidden=button.dataset.filter!=='todos'&&card.dataset.category!==button.dataset.filter;});
-}));
-function trackConversion(kind){if(BUSINESS.analyticsEnabled&&typeof window.gtag==='function'){window.gtag('event','generate_lead',{method:'whatsapp',content_type:kind});}}
-function openWhatsApp(product=''){
-  const feedback=document.querySelector('#contact-feedback');
-  if(!/^\d{12,15}$/.test(BUSINESS.whatsapp)){
-    feedback.textContent='WhatsApp ainda não configurado. Este é um site demonstrativo.';
-    feedback.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'center'});
-    return;
-  }
-  feedback.textContent='';
-  const message=product?`Olá! Gostaria de consultar a disponibilidade de ${product} no ${BUSINESS.name}.`:`Olá! Gostaria de conhecer os produtos disponíveis no ${BUSINESS.name}.`;
-  const url=`https://wa.me/${BUSINESS.whatsapp}?text=${encodeURIComponent(message)}`;
-  trackConversion(product?'produto':'contato');
-  window.open(url,'_blank','noopener,noreferrer');
+const cfg = window.MERCADO_CONFIG;
+if (!cfg) { console.error('Configuração não carregada.'); return; }
+const $ = (sel) => document.querySelector(sel);
+const all = (sel) => [...document.querySelectorAll(sel)];
+const brl = cents => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(cents/100);
+const productById = new Map(cfg.products.map(p=>[p.id,p]));
+const key = 'mercado-da-vila-v2-cart';
+let cart={};
+try { const saved=JSON.parse(localStorage.getItem(key)||'{}'); if(saved && typeof saved==='object' && !Array.isArray(saved)) for(const [id,quantity] of Object.entries(saved)){ if(productById.has(id) && Number.isInteger(quantity) && quantity>0 && quantity<=99) cart[id]=quantity; } }catch { cart={}; }
+let activeCategory='Todos', query='', previousFocus=null;
+function save(){ try{ localStorage.setItem(key,JSON.stringify(cart)); } catch {/* Browsers may disable storage; cart still works in memory. */} }
+function count(){return Object.values(cart).reduce((a,b)=>a+b,0);}
+function showToast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(showToast.timeout);showToast.timeout=setTimeout(()=>el.classList.remove('show'),2600);}
+function productCard(p){const article=document.createElement('article');article.className='product-card';const image=document.createElement('div');image.className='product-image';const img=document.createElement('img');img.src='assets/images/'+p.image;img.alt='Ilustração demonstrativa de '+p.name;img.loading='lazy';img.width=600;img.height=420;image.append(img);if(p.offer){const label=document.createElement('span');label.className='offer-label';label.textContent='OFERTA DEMO';image.append(label);}const body=document.createElement('div');body.className='product-body';const cat=document.createElement('span');cat.className='product-category';cat.textContent=p.category;const name=document.createElement('h3');name.textContent=p.name;const unit=document.createElement('p');unit.textContent=p.unit+' · imagem ilustrativa';const price=document.createElement('div');price.className='product-price';const strong=document.createElement('strong');strong.textContent=brl(p.cents);price.append(strong);if(p.oldCents){const old=document.createElement('del');old.textContent=brl(p.oldCents);price.append(old);}const button=document.createElement('button');button.className='button add-button';button.type='button';button.textContent='＋ Adicionar';button.setAttribute('aria-label','Adicionar '+p.name+' à lista');button.addEventListener('click',()=>add(p.id));body.append(cat,name,unit,price,button);article.append(image,body);return article;}
+function renderCards(container,products){container.replaceChildren(...products.map(productCard));}
+function renderCategories(){const el=$('#categoryList');el.replaceChildren(...cfg.categories.map(cat=>{const b=document.createElement('button');b.type='button';b.className='category-button'+(activeCategory===cat?' active':'');b.textContent=cat;b.setAttribute('aria-pressed',String(activeCategory===cat));b.addEventListener('click',()=>{activeCategory=cat;renderCategories();renderCatalog();});return b;}));}
+function renderCatalog(){const filtered=cfg.products.filter(p=>(activeCategory==='Todos'||p.category===activeCategory) && (p.name+' '+p.category).toLocaleLowerCase('pt-BR').includes(query));renderCards($('#productGrid'),filtered);$('#resultsCount').textContent=filtered.length+' '+(filtered.length===1?'produto encontrado':'produtos encontrados')+' · valores fictícios';if(!filtered.length)$('#productGrid').textContent='Nenhum produto encontrado. Tente outro termo.';}
+function add(id){cart[id]=Math.min(99,(cart[id]||0)+1);save();renderCart();showToast(productById.get(id).name+' adicionado à lista');}
+function updateQty(id,delta){const quantity=(cart[id]||0)+delta;if(quantity<=0)delete cart[id];else cart[id]=Math.min(99,quantity);save();renderCart();}
+function renderCart(){const items=$('#cartItems');items.replaceChildren();let total=0;for(const [id,q] of Object.entries(cart)){const p=productById.get(id);if(!p)continue;total+=p.cents*q;const row=document.createElement('article');row.className='cart-line';const img=document.createElement('img');img.src='assets/images/'+p.image;img.alt='';img.width=70;img.height=60;const info=document.createElement('div');info.className='cart-line-info';const title=document.createElement('strong');title.textContent=p.name;const unit=document.createElement('span');unit.textContent=p.unit+' · '+brl(p.cents)+' cada';info.append(title,unit);const controls=document.createElement('div');controls.className='qty-controls';const minus=document.createElement('button');minus.textContent='−';minus.setAttribute('aria-label','Diminuir '+p.name);minus.addEventListener('click',()=>updateQty(id,-1));const n=document.createElement('span');n.textContent=q;const plus=document.createElement('button');plus.textContent='+';plus.setAttribute('aria-label','Aumentar '+p.name);plus.disabled=q>=99;plus.addEventListener('click',()=>updateQty(id,1));const remove=document.createElement('button');remove.textContent='✕';remove.className='remove-item';remove.setAttribute('aria-label','Remover '+p.name);remove.addEventListener('click',()=>updateQty(id,-q));controls.append(minus,n,plus,remove);row.append(img,info,controls);items.append(row);}
+ if(!count()){const empty=document.createElement('p');empty.className='empty-cart';empty.textContent='Sua lista está vazia. Explore os produtos e adicione seus favoritos.';items.append(empty);}
+ all('[data-cart-count]').forEach(el=>el.textContent=String(count()));$('#cartTotal').textContent=brl(total);$('#checkoutWhatsapp').disabled=count()===0;$('#clearCart').disabled=count()===0;
 }
-document.querySelectorAll('[data-product]').forEach(button=>button.addEventListener('click',()=>openWhatsApp(button.dataset.product)));
-document.querySelector('#contact-cta').addEventListener('click',()=>openWhatsApp());
-document.querySelector('#year').textContent=String(new Date().getFullYear());
+function openCart(){previousFocus=document.activeElement;$('#drawerBackdrop').hidden=false;$('#cartDrawer').inert=false;$('#cartDrawer').setAttribute('aria-hidden','false');document.body.classList.add('drawer-open');$('#closeCart').focus();}
+function closeCart(){document.body.classList.remove('drawer-open');$('#cartDrawer').inert=true;$('#cartDrawer').setAttribute('aria-hidden','true');$('#drawerBackdrop').hidden=true;if(previousFocus && previousFocus.isConnected)previousFocus.focus();}
+function validWhatsApp(){return /^\d{10,13}$/.test((cfg.whatsapp||'').replace(/\D/g,''));}
+function handleWhatsApp(isOrder){if(!validWhatsApp()){const msg='WhatsApp não configurado: substitua o número vazio em js/data.js por um número real do comércio.';if(isOrder)$('#cartFeedback').textContent=msg;else showToast(msg);return;}
+ const number=cfg.whatsapp.replace(/\D/g,'');let message='Olá! Gostaria de conhecer os produtos do '+cfg.nome+'.';if(isOrder){if(!count())return;let total=0;const lines=Object.entries(cart).map(([id,q])=>{const p=productById.get(id);total+=p.cents*q;return `• ${q} × ${p.name} (${p.unit}) — ${brl(q*p.cents)}`;});message=`Olá! Montei uma lista pelo site do ${cfg.nome}:\n\n${lines.join('\n')}\n\nTotal demonstrativo: ${brl(total)}\n\nPodem confirmar preços, estoque, entrega e valor final?`;}
+ const url='https://wa.me/'+number+'?text='+encodeURIComponent(message);const newTab=window.open(url,'_blank','noopener,noreferrer');if(!newTab) window.location.href=url;
+}
+function setStoreInfo(){ $('#storeAddress').textContent=cfg.endereco||'Endereço não informado — personalize em js/data.js.';$('#storeHours').textContent=cfg.horario;$('#paymentMethods').textContent=cfg.pagamentos;const m=$('#mapLink');if(cfg.mapsUrl && /^https:\/\//.test(cfg.mapsUrl)){m.href=cfg.mapsUrl;m.target='_blank';m.rel='noopener noreferrer';m.removeAttribute('aria-disabled');m.textContent='Ver no mapa ↗';}else{m.addEventListener('click',ev=>{ev.preventDefault();showToast('Configure um endereço e link de mapa reais em js/data.js.');});} }
+function initNavigation(){const toggle=$('#menuToggle');const menu=$('#mainNav');toggle.addEventListener('click',()=>{const expanded=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!expanded));toggle.setAttribute('aria-label',expanded?'Abrir menu':'Fechar menu');menu.classList.toggle('visible',!expanded);});all('#mainNav a').forEach(a=>a.addEventListener('click',()=>{toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','Abrir menu');menu.classList.remove('visible');}));}
+function initShare(){ $('#shareSite').addEventListener('click',async()=>{const data={title:'Mercado da Vila — demonstração',text:'Conheça este catálogo demonstrativo de mercado de bairro.',url:location.href};try{if(navigator.share){await navigator.share(data);$('#shareFeedback').textContent='Compartilhamento aberto.';}else if(navigator.clipboard?.writeText && window.isSecureContext){await navigator.clipboard.writeText(location.href);$('#shareFeedback').textContent='Link copiado!';}else{$('#shareFeedback').textContent='Copie o endereço na barra do navegador.';}}catch(e){if(e.name!=='AbortError')$('#shareFeedback').textContent='Copie o endereço na barra do navegador.';}});}
+function init(){renderCards($('#offersGrid'),cfg.products.filter(p=>p.offer));renderCategories();renderCatalog();renderCart();setStoreInfo();initNavigation();initShare();$('#productSearch').addEventListener('input',e=>{query=e.target.value.trim().toLocaleLowerCase('pt-BR');renderCatalog();});['#openCartTop','#openCartMobile','#openCartCta'].forEach(sel=>$(sel).addEventListener('click',openCart));$('#closeCart').addEventListener('click',closeCart);$('#drawerBackdrop').addEventListener('click',closeCart);document.addEventListener('keydown',e=>{if(e.key==='Escape' && !$('#cartDrawer').inert)closeCart();if(e.key==='Tab' && !$('#cartDrawer').inert){const focusable=all('#cartDrawer button:not(:disabled),#cartDrawer a[href]');if(!focusable.length)return;const first=focusable[0],last=focusable[focusable.length-1];if(e.shiftKey && document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey && document.activeElement===last){e.preventDefault();first.focus();}}});$('#checkoutWhatsapp').addEventListener('click',()=>handleWhatsApp(true));$('#floatWhatsapp').addEventListener('click',()=>handleWhatsApp(false));$('#clearCart').addEventListener('click',()=>{cart={};save();renderCart();$('#cartFeedback').textContent='Lista limpa.';});$('#year').textContent=new Date().getFullYear();}
+init();
+})();
